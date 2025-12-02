@@ -220,3 +220,5 @@ app.post('/leads/validar-etapa1', async (req, res) => {
 app.listen(3000, () => {
     console.log(`Server Started at ${3000}`);
 });
+
+module.exports = app;
