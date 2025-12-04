@@ -65,7 +65,7 @@ const LeadSchema = new mongoose.Schema({
     dataCadastro : { type: Date, default: Date.now }
 });
 
-const Lead = mongoose.model('Lead', LeadSchema);
+const Lead = mongoose.models.Lead || mongoose.model('Lead', LeadSchema);
 
 // -- Função para validações da Etapa 1 --
 function validarEtapa1(lead) {
