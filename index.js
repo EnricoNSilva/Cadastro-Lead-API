@@ -6,38 +6,50 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const mongoString = process.env.DB_CONNECTION_STRING;
+let isConnected = false; // Variável global para cache da conexão
 
-if (!mongoString) {
-    console.warn('DB_CONNECTION_STRING não encontrado em env. Conexão com Mongo não será iniciada.');
-} else {
-    // Note: recent MongoDB drivers remove options like useNewUrlParser/useUnifiedTopology.
-    // Passing unsupported options causes runtime errors (`options usenewurlparser are not supported`).
-    mongoose.connect(mongoString, {
-        // Keep only supported options; adjust timeout to fail fast in serverless envs
-        serverSelectionTimeoutMS: 5000 // tempo curto para falhar rápido em ambientes sem DB
-    }).catch(err => {
-        console.error('Erro ao conectar no MongoDB:', err && err.message ? err.message : err);
-        if (err && err.stack) console.error(err.stack);
+async function connectToDatabase() {
+  // Se já estiver conectado, reutiliza a conexão
+  if (isConnected) {
+    return;
+  }
+
+  // Se não, conecta agora
+  console.log('=> Criando nova conexão com o MongoDB...');
+  
+  if (!process.env.DB_CONNECTION_STRING) {
+     throw new Error('DB_CONNECTION_STRING não definida no .env!');
+  }
+
+  try {
+    const db = await mongoose.connect(process.env.DB_CONNECTION_STRING, {
+      serverSelectionTimeoutMS: 5000, // Timeout curto para não travar a Vercel
     });
+    
+    isConnected = db.connections[0].readyState;
+    console.log('=> Conectado ao MongoDB!');
+  } catch (error) {
+    console.error('=> Erro fatal na conexão:', error);
+    throw error; // Lança o erro para a rota tratar
+  }
 }
-const database = mongoose.connection;
 
-database.on('error', (error) => {
-  console.log(error);
-});
+// Middleware que garante a conexão ANTES de qualquer rota
+app.use(async (req, res, next) => {
+    // Pula conexão para rotas de "ping" ou arquivos estáticos se houver
+    if (req.path === '/') return next(); 
 
-database.once('connected', () => {
-  console.log('Database Connected');
-});
-
-// Middleware utilitário para garantir que o DB esteja conectado antes de processar rotas que dependem dele
-function ensureDbConnected(req, res, next) {
-    if (mongoose.connection.readyState !== 1) {
-        return res.status(503).json({ mensagem: 'Serviço temporariamente indisponível: banco de dados não conectado.' });
+    try {
+        await connectToDatabase();
+        next(); // Se conectou, segue para a rota (validar-etapa1, leads, etc)
+    } catch (error) {
+        res.status(503).json({ 
+            error: "Erro de conexão com o banco de dados",
+            details: error.message 
+        });
     }
-    next();
-}
+});
+
 // Definindo o esquema do Lead
 const LeadSchema = new mongoose.Schema({
     nome : { type: String, required: true },
@@ -238,11 +250,11 @@ async function handleValidarEtapa1(req, res) {
 
 app.post('/leads/validar-etapa1', ensureDbConnected, (req, res) => handleValidarEtapa1(req, res));
 
-// Rota de compatibilidade com versões que chamam `/validar-etapa-1` (hífen)
-app.post('/validar-etapa-1', ensureDbConnected, (req, res) => handleValidarEtapa1(req, res));
-
-app.listen(3000, () => {
-    console.log(`Server Started at ${3000}`);
-});
+if (require.main === module) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+    });
+}
 
 module.exports = app;
