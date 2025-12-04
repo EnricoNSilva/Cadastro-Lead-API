@@ -104,7 +104,7 @@ function validarEtapa1(lead) {
     }
     
     // Regex Email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
     const emailTest = lead.email ? lead.email.trim().toLowerCase() : '';
     if (!lead.email || typeof lead.email !== 'string' ||
          lead.email.trim() === '' || !emailRegex.test(emailTest)) {
