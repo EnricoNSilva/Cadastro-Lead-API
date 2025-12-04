@@ -11,12 +11,14 @@ const mongoString = process.env.DB_CONNECTION_STRING;
 if (!mongoString) {
     console.warn('DB_CONNECTION_STRING não encontrado em env. Conexão com Mongo não será iniciada.');
 } else {
+    // Note: recent MongoDB drivers remove options like useNewUrlParser/useUnifiedTopology.
+    // Passing unsupported options causes runtime errors (`options usenewurlparser are not supported`).
     mongoose.connect(mongoString, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
+        // Keep only supported options; adjust timeout to fail fast in serverless envs
         serverSelectionTimeoutMS: 5000 // tempo curto para falhar rápido em ambientes sem DB
     }).catch(err => {
         console.error('Erro ao conectar no MongoDB:', err && err.message ? err.message : err);
+        if (err && err.stack) console.error(err.stack);
     });
 }
 const database = mongoose.connection;
