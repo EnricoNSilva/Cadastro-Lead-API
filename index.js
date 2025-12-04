@@ -8,7 +8,17 @@ app.use(cors());
 
 const mongoString = process.env.DB_CONNECTION_STRING;
 
-mongoose.connect(mongoString);
+if (!mongoString) {
+    console.warn('DB_CONNECTION_STRING não encontrado em env. Conexão com Mongo não será iniciada.');
+} else {
+    mongoose.connect(mongoString, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 5000 // tempo curto para falhar rápido em ambientes sem DB
+    }).catch(err => {
+        console.error('Erro ao conectar no MongoDB:', err && err.message ? err.message : err);
+    });
+}
 const database = mongoose.connection;
 
 database.on('error', (error) => {
@@ -18,6 +28,14 @@ database.on('error', (error) => {
 database.once('connected', () => {
   console.log('Database Connected');
 });
+
+// Middleware utilitário para garantir que o DB esteja conectado antes de processar rotas que dependem dele
+function ensureDbConnected(req, res, next) {
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ mensagem: 'Serviço temporariamente indisponível: banco de dados não conectado.' });
+    }
+    next();
+}
 // Definindo o esquema do Lead
 const LeadSchema = new mongoose.Schema({
     nome : { type: String, required: true },
@@ -111,7 +129,7 @@ function validarLead(lead) {
 
 //                                          --- Rotas ---
 // Post para criar um novo lead
-app.post('/leads', async (req, res) => {
+app.post('/leads', ensureDbConnected, async (req, res) => {
     // Validação antes de tentar salvar
     const erros = validarLead(req.body);
 
@@ -143,7 +161,7 @@ app.post('/leads', async (req, res) => {
 });
 
 // Get para listar todos os leads
-app.get('/leads', async (req, res) => {
+app.get('/leads', ensureDbConnected, async (req, res) => {
     try{
         const leads = await Lead.find().sort({ dataCadastro: -1 }); // Ordena por data de cadastro decrescente
         res.status(200).json(leads);
@@ -153,7 +171,7 @@ app.get('/leads', async (req, res) => {
 })
 
 // Delete para remover um lead pelo ID
-app.delete('/leads/:id', async (req, res) => {
+app.delete('/leads/:id', ensureDbConnected, async (req, res) => {
     try{
         const id = req.params.id;
         
@@ -173,18 +191,12 @@ app.delete('/leads/:id', async (req, res) => {
 });
 
 // Validar dados da Etapa 1 (antes de avançar)
-app.post('/leads/validar-etapa1', async (req, res) => {
+// Handler reutilizável para validação da etapa 1
+async function handleValidarEtapa1(req, res) {
     const { nome, email, telefone, perfil, empresa, cargo } = req.body;
     
     // Cria objeto apenas com os campos da etapa 1
-    const leadEtapa1 = {
-        nome,
-        email,
-        telefone,
-        perfil,
-        empresa,
-        cargo
-    };
+    const leadEtapa1 = { nome, email, telefone, perfil, empresa, cargo };
     
     // Valida os campos da etapa 1
     const erros = validarEtapa1(leadEtapa1);
@@ -194,18 +206,23 @@ app.post('/leads/validar-etapa1', async (req, res) => {
     }
 
     // Validação de Duplicidade
-    if (email) {
-        const emailExiste = await Lead.findOne({ email: email });
-        if (emailExiste) {
-            erros.push("Este e-mail já está participando da promoção.");
+    try {
+        if (email) {
+            const emailExiste = await Lead.findOne({ email: email });
+            if (emailExiste) {
+                erros.push("Este e-mail já está participando da promoção.");
+            }
         }
-    }
 
-    if (telefone) {
-        const telExiste = await Lead.findOne({ telefone: telefone });
-        if (telExiste) {
-            erros.push("Este telefone já está cadastrado.");
+        if (telefone) {
+            const telExiste = await Lead.findOne({ telefone: telefone });
+            if (telExiste) {
+                erros.push("Este telefone já está cadastrado.");
+            }
         }
+    } catch (err) {
+        // Se ocorrer erro ao consultar o DB, retorna 500 com mensagem clara
+        return res.status(500).json({ mensagem: 'Erro ao validar duplicidade. Tente novamente mais tarde.' });
     }
 
     // Se houver erros de duplicidade, retorna
@@ -215,7 +232,12 @@ app.post('/leads/validar-etapa1', async (req, res) => {
 
     // Se passou por tudo, retorna sucesso
     return res.status(200).json({ mensagem: "Etapa 1 válida. Pode prosseguir." });
-});
+}
+
+app.post('/leads/validar-etapa1', ensureDbConnected, (req, res) => handleValidarEtapa1(req, res));
+
+// Rota de compatibilidade com versões que chamam `/validar-etapa-1` (hífen)
+app.post('/validar-etapa-1', ensureDbConnected, (req, res) => handleValidarEtapa1(req, res));
 
 app.listen(3000, () => {
     console.log(`Server Started at ${3000}`);
